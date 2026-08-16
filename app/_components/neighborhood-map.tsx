@@ -20,6 +20,24 @@ const STOPS: Stop[] = [
   { name: "Maywood", lat: 41.8789, lng: -87.8493, type: "Metra" },
 ];
 
+const AREA_BOUNDARIES: Record<string, [number, number][]> = {
+  "Forest Park": [
+    [-87.840, 41.890], [-87.800, 41.890], [-87.800, 41.868], [-87.840, 41.868], [-87.840, 41.890],
+  ],
+  "Oak Park": [
+    [-87.800, 41.902], [-87.770, 41.902], [-87.770, 41.868], [-87.800, 41.868], [-87.800, 41.902],
+  ],
+};
+
+const STREET_LABELS: { name: string; lng: number; lat: number }[] = [
+  { name: "Madison St", lng: -87.81, lat: 41.8755 },
+  { name: "Roosevelt Rd", lng: -87.81, lat: 41.866 },
+  { name: "Harlem Ave", lng: -87.802, lat: 41.885 },
+  { name: "Lake St", lng: -87.79, lat: 41.888 },
+  { name: "North Ave", lng: -87.79, lat: 41.906 },
+  { name: "Austin Blvd", lng: -87.772, lat: 41.895 },
+];
+
 export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -34,9 +52,9 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
         sources: {
           osm: {
             type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],
             tileSize: 256,
-            attribution: "© OpenStreetMap contributors",
+            attribution: "© OpenStreetMap contributors, © CARTO",
           },
         },
         layers: [{ id: "osm", type: "raster", source: "osm" }],
@@ -50,6 +68,68 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
     map.on("load", () => {
       const ctaStops = STOPS.filter((s) => s.type === "CTA");
       const metraStops = STOPS.filter((s) => s.type === "Metra");
+
+      const allBoundaries = Object.entries(AREA_BOUNDARIES);
+      map.addSource("boundaries", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: allBoundaries.map(([name, coords]) => ({
+            type: "Feature" as const,
+            geometry: { type: "Polygon", coordinates: [coords] },
+            properties: { name },
+          })),
+        },
+      });
+
+      map.addLayer({
+        id: "boundary-fill",
+        type: "fill",
+        source: "boundaries",
+        paint: {
+          "fill-color": "#2f5445",
+          "fill-opacity": 0.06,
+        },
+      });
+
+      map.addLayer({
+        id: "boundary-line",
+        type: "line",
+        source: "boundaries",
+        paint: {
+          "line-color": "#2f5445",
+          "line-width": 2,
+          "line-dasharray": [4, 3],
+        },
+      });
+
+      map.addSource("street-labels", {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: STREET_LABELS.map((street) => ({
+            type: "Feature" as const,
+            geometry: { type: "Point", coordinates: [street.lng, street.lat] },
+            properties: { name: street.name },
+          })),
+        },
+      });
+
+      map.addLayer({
+        id: "street-label-layer",
+        type: "symbol",
+        source: "street-labels",
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 11,
+          "text-anchor": "center",
+        },
+        paint: {
+          "text-color": "#4a5a50",
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 2.5,
+        },
+      });
 
       map.addSource("cta", {
         type: "geojson",
