@@ -2,116 +2,77 @@
 
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
-import {
-  ArrowUpRight,
-  Download,
-  FileSpreadsheet,
-  Heart,
-  Home,
-  MapPin,
-  MessageCircle,
-  Plus,
-  Search,
-  Sparkles,
-  WandSparkles,
-} from "lucide-react";
+import { ArrowUpRight, Download, ExternalLink, FileSpreadsheet, Home, MessageCircle, Plus, Search, Sparkles, WandSparkles, X } from "lucide-react";
 import { useState } from "react";
-import {
-  PromptInput,
-  type PromptInputMessage,
-  PromptInputSubmit,
-  PromptInputTextarea,
-} from "@/components/ai-elements/prompt-input";
+import { PromptInput, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea } from "@/components/ai-elements/prompt-input";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
 
-type Listing = {
-  address: string;
-  price: string;
-  beds: string;
-  baths: string;
-  backyard: string;
-  tone: string;
-};
-
-const ZILLOW_URL = "https://www.zillow.com/forest-park-il/?searchQueryState=%7B%22pagination%22%3A%7B%7D%2C%22isMapVisible%22%3Atrue%2C%22mapBounds%22%3A%7B%22west%22%3A-87.8664632807617%2C%22east%22%3A-87.77651271923827%2C%22south%22%3A41.83204204050914%2C%22north%22%3A41.904906612073795%7D%2C%22mapZoom%22%3A13%2C%22regionSelection%22%3A%5B%7B%22regionId%22%3A11475%2C%22regionType%22%3A6%7D%5D%2C%22filterState%22%3A%7B%22sort%22%3A%7B%22value%22%3A%22globalrelevanceex%22%7D%2C%22price%22%3A%7B%22max%22%3A800000%2C%22min%22%3A500000%7D%7D%2C%22isListVisible%22%3Atrue%2C%22usersSearchTerm%22%3A%22Forest%20Park%20IL%22%7D";
+type Source = "Zillow" | "Redfin" | "Other";
+type Status = "New" | "Maybe" | "Tour" | "Pass";
+type Listing = { address: string; price: string; beds: string; baths: string; backyard: string; source: Source; status: Status; url: string; notes: string; tone: string };
+type Draft = Pick<Listing, "address" | "price" | "beds" | "baths" | "backyard" | "source" | "url" | "notes">;
 
 const INITIAL_LISTINGS: Listing[] = [
-  { address: "7421 Madison St", price: "$589,000", beds: "3", baths: "2", backyard: "—", tone: "coral" },
-  { address: "815 Elgin Ave", price: "$649,900", beds: "4", baths: "2.5", backyard: "0.18 ac", tone: "sage" },
-  { address: "421 Thomas Ave", price: "$725,000", beds: "4", baths: "3", backyard: "—", tone: "sand" },
+  { address: "7421 Madison St", price: "$589,000", beds: "3", baths: "2", backyard: "—", source: "Zillow", status: "New", url: "https://www.zillow.com/", notes: "Good light. Need to check the yard.", tone: "coral" },
+  { address: "815 Elgin Ave", price: "$649,900", beds: "4", baths: "2.5", backyard: "0.18 ac", source: "Redfin", status: "Tour", url: "https://www.redfin.com/", notes: "Strong contender, close to the park.", tone: "sage" },
+  { address: "421 Thomas Ave", price: "$725,000", beds: "4", baths: "3", backyard: "—", source: "Zillow", status: "Maybe", url: "https://www.zillow.com/", notes: "Price feels high for the block.", tone: "sand" },
 ];
+
+const EMPTY_DRAFT: Draft = { address: "", price: "", beds: "", baths: "", backyard: "", source: "Zillow", url: "", notes: "" };
+const STATUSES: Status[] = ["New", "Maybe", "Tour", "Pass"];
 
 export function AgentChat() {
   const agent = useEveAgent();
   const [listings, setListings] = useState(INITIAL_LISTINGS);
-  const [saved, setSaved] = useState<string[]>(["815 Elgin Ave"]);
+  const [sourceFilter, setSourceFilter] = useState<Source | "All">("All");
+  const [statusFilter, setStatusFilter] = useState<Status | "All">("All");
+  const [search, setSearch] = useState("");
+  const [isAdding, setIsAdding] = useState(false);
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [cancellationError, setCancellationError] = useState<string>();
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
+  const visibleListings = listings.filter((listing) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch = !query || `${listing.address} ${listing.notes}`.toLowerCase().includes(query);
+    return matchesSearch && (sourceFilter === "All" || listing.source === sourceFilter) && (statusFilter === "All" || listing.status === statusFilter);
+  });
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
     if ((text.length === 0 && message.files.length === 0) || isBusy) return;
     setCancellationError(undefined);
-    if (message.files.length === 0) {
-      await agent.send(text);
-      return;
-    }
+    if (message.files.length === 0) { await agent.send(text); return; }
     const parts: UserContent = text ? [{ text, type: "text" }] : [];
-    for (const file of message.files) {
-      parts.push({ data: file.url, filename: file.filename, mediaType: file.mediaType, type: "file" });
-    }
+    for (const file of message.files) parts.push({ data: file.url, filename: file.filename, mediaType: file.mediaType, type: "file" });
     await agent.send(parts);
   };
 
   const downloadCsv = () => {
-    const header = "Address,Price,Beds,Baths,Backyard size";
-    const rows = listings.map((listing) => [listing.address, listing.price, listing.beds, listing.baths, listing.backyard].join(","));
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "forest-park-homes.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+    const csvCell = (value: string) => `"${value.replaceAll('"', '""')}"`;
+    const rows = listings.map((listing) => [listing.address, listing.price, listing.beds, listing.baths, listing.backyard].map(csvCell).join(","));
+    const blob = new Blob([["Address,Price,Beds,Baths,Backyard size", ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "hearth-house-tracker.csv"; link.click(); URL.revokeObjectURL(url);
   };
 
-  const addListing = () => setListings((current) => [...current, { address: "New address", price: "$0", beds: "—", baths: "—", backyard: "—", tone: "blue" }]);
+  const addListing = () => {
+    if (!draft.address.trim()) return;
+    setListings((current) => [...current, { ...draft, address: draft.address.trim(), status: "New", tone: "blue" }]);
+    setDraft(EMPTY_DRAFT); setIsAdding(false);
+  };
+
+  const cycleStatus = (address: string) => setListings((current) => current.map((listing) => listing.address === address ? { ...listing, status: STATUSES[(STATUSES.indexOf(listing.status) + 1) % STATUSES.length] } : listing));
 
   return (
     <main className="property-app">
-      <header className="topbar">
-        <div className="brand"><span className="brand-mark"><Home size={17} strokeWidth={2.5} /></span><span>Hearth</span><span className="version-pill">v0.1</span><span className="brand-note">a house-hunting workspace</span></div>
-        <div className="top-actions"><span className="sync-status"><span className="status-dot" /> Agent online</span><button className="avatar">M</button></div>
-      </header>
-
+      <header className="topbar"><div className="brand"><span className="brand-mark"><Home size={17} strokeWidth={2.5} /></span><span>Hearth</span><span className="version-pill">v0.1</span><span className="brand-note">house tracker</span></div><div className="top-actions"><span className="sync-status"><span className="status-dot" /> Agent online</span><button className="avatar">M</button></div></header>
       <div className="workspace">
-        <aside className="conversation-panel">
-          <div className="panel-kicker"><Sparkles size={14} /> HOUSE HUNT / 01</div>
-          <h1>Let&apos;s find the<br /><em>right place.</em></h1>
-          <p className="lede">Tell me what matters. I&apos;ll keep the shortlist tidy while we look.</p>
-          <div className="prompt-chips"><button onClick={() => void agent.send("Show me the best value in this shortlist")}>Best value <ArrowUpRight size={13} /></button><button onClick={() => void agent.send("What should I look for in the backyards?")}>Backyard notes <ArrowUpRight size={13} /></button></div>
-          <div className="chat-stream">
-            {agent.data.messages.length === 0 ? (
-              <div className="starter-note"><span className="agent-avatar"><WandSparkles size={15} /></span><div><strong>Hi, I&apos;m ready.</strong><p>Ask me to compare homes, spot tradeoffs, or add a listing to your tracker.</p></div></div>
-            ) : agent.data.messages.map((message, index) => <AgentMessage canRespond={!isBusy} isStreaming={agent.status === "streaming" && index === agent.data.messages.length - 1} key={message.id} message={message} onInputResponses={(inputResponses) => { setCancellationError(undefined); return agent.respond(inputResponses); }} />)}
-          </div>
-          {cancellationError ? <p className="error-copy">{cancellationError}</p> : null}
-          <PromptInput onSubmit={handleSubmit}>
-            <PromptInputTextarea placeholder="Ask about these homes…" />
-            <PromptInputSubmit onStop={() => void agent.cancel()} status={agent.status} />
-          </PromptInput>
-          <div className="privacy-note"><MessageCircle size={12} /> Conversations stay in this workspace</div>
-        </aside>
-
-        <section className="results-panel">
-          <div className="results-heading"><div><div className="eyebrow"><MapPin size={13} /> SEARCH AREA</div><h2>Forest Park, IL</h2><p>Homes between <strong>$500k</strong> and <strong>$800k</strong></p></div><a className="source-link" href={ZILLOW_URL} target="_blank" rel="noreferrer">Open Zillow <ArrowUpRight size={14} /></a></div>
-          <div className="filter-row"><button className="filter active"><span className="filter-dot" /> 3 homes in your range</button><button className="filter">4+ beds</button><button className="filter">Backyard</button><button className="filter muted">Add filter <Plus size={14} /></button></div>
-          <div className="map-card"><div className="map-label"><MapPin size={13} /> Forest Park</div><div className="map-road road-one" /><div className="map-road road-two" /><div className="map-road road-three" /><div className="map-water" /><span className="map-place place-one">Madison St</span><span className="map-place place-two">Desplaines Ave</span>{listings.map((listing, index) => <button aria-label={`View ${listing.address}`} className={cn("map-pin", `pin-${index + 1}`, saved.includes(listing.address) && "is-saved")} key={listing.address} onClick={() => setSaved((current) => current.includes(listing.address) ? current : [...current, listing.address])}><span>{index + 1}</span></button>)}</div>
-          <div className="list-header"><div><span className="eyebrow">SHORTLIST</span><h3>{listings.length} homes to look at</h3></div><div className="list-actions"><button className="icon-button" aria-label="Download CSV" onClick={downloadCsv}><Download size={16} /></button><button className="csv-button" onClick={downloadCsv}><FileSpreadsheet size={15} /> Download CSV</button></div></div>
-          <div className="listing-list">{listings.map((listing, index) => <article className="listing-card" key={`${listing.address}-${index}`}><div className={cn("listing-image", `image-${listing.tone}`)}><div className="image-lines" /><span className="listing-number">0{index + 1}</span><button className={cn("heart-button", saved.includes(listing.address) && "saved")} aria-label={`Save ${listing.address}`} onClick={() => setSaved((current) => current.includes(listing.address) ? current.filter((address) => address !== listing.address) : [...current, listing.address])}><Heart size={16} fill={saved.includes(listing.address) ? "currentColor" : "none"} /></button></div><div className="listing-info"><div className="listing-main"><h4>{listing.address}</h4><p>Forest Park, IL</p></div><strong className="listing-price">{listing.price}</strong><div className="listing-meta"><span><b>{listing.beds}</b> beds</span><span><b>{listing.baths}</b> baths</span><span><b>{listing.backyard}</b> yard</span></div><button className="details-button">View details <ArrowUpRight size={14} /></button></div></article>)}</div>
-          <button className="add-listing" onClick={addListing}><Plus size={16} /> Add a home manually</button>
-        </section>
+        <aside className="conversation-panel"><div className="panel-kicker"><Sparkles size={14} /> HEARTH / 01</div><h1>Find a place.<br /><em>Keep it here.</em></h1><p className="lede">Drop in a listing from anywhere. I&apos;ll help you compare the ones worth your time.</p><div className="prompt-chips"><button onClick={() => void agent.send("Which home is the best value?")}>Best value <ArrowUpRight size={13} /></button><button onClick={() => void agent.send("What should I ask at a tour?")}>Tour questions <ArrowUpRight size={13} /></button></div><div className="chat-stream">{agent.data.messages.length === 0 ? <div className="starter-note"><span className="agent-avatar"><WandSparkles size={15} /></span><div><strong>Ask me anything.</strong><p>Compare homes, think through tradeoffs, or turn a messy listing into a clear note.</p></div></div> : agent.data.messages.map((message, index) => <AgentMessage canRespond={!isBusy} isStreaming={agent.status === "streaming" && index === agent.data.messages.length - 1} key={message.id} message={message} onInputResponses={(inputResponses) => { setCancellationError(undefined); return agent.respond(inputResponses); }} />)}</div>{cancellationError ? <p className="error-copy">{cancellationError}</p> : null}<PromptInput onSubmit={handleSubmit}><PromptInputTextarea placeholder="Ask about your shortlist…" /><PromptInputSubmit onStop={() => void agent.cancel()} status={agent.status} /></PromptInput><div className="privacy-note"><MessageCircle size={12} /> Your workspace, your shortlist</div></aside>
+        <section className="tracker-panel"><div className="tracker-heading"><div><div className="eyebrow"><Home size={13} /> HOUSE TRACKER</div><h2>Everything worth a look.</h2><p>{listings.length} homes saved across your search</p></div><div className="tracker-actions"><button className="secondary-button" onClick={downloadCsv}><Download size={15} /> Export CSV</button><button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={15} /> Add home</button></div></div>
+          <div className="tracker-toolbar"><label className="search-field"><Search size={15} /><input aria-label="Search homes" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search address or notes" /></label><div className="source-tabs"><button className={sourceFilter === "All" ? "selected" : ""} onClick={() => setSourceFilter("All")}>All <span>{listings.length}</span></button>{(["Zillow", "Redfin", "Other"] as Source[]).map((source) => <button className={sourceFilter === source ? "selected" : ""} key={source} onClick={() => setSourceFilter(source)}>{source} <span>{listings.filter((listing) => listing.source === source).length}</span></button>)}</div></div>
+          {isAdding ? <div className="add-form"><div className="add-form-heading"><div><span className="eyebrow">NEW HOME</span><h3>Add something worth remembering</h3></div><button className="close-button" aria-label="Close add form" onClick={() => setIsAdding(false)}><X size={16} /></button></div><div className="form-grid"><label>Address<input autoFocus value={draft.address} onChange={(event) => setDraft({ ...draft, address: event.target.value })} placeholder="123 Main Street" /></label><label>Source<select value={draft.source} onChange={(event) => setDraft({ ...draft, source: event.target.value as Source })}><option>Zillow</option><option>Redfin</option><option>Other</option></select></label><label>Price<input value={draft.price} onChange={(event) => setDraft({ ...draft, price: event.target.value })} placeholder="$650,000" /></label><label>Beds<input value={draft.beds} onChange={(event) => setDraft({ ...draft, beds: event.target.value })} placeholder="3" /></label><label>Baths<input value={draft.baths} onChange={(event) => setDraft({ ...draft, baths: event.target.value })} placeholder="2" /></label><label>Backyard size<input value={draft.backyard} onChange={(event) => setDraft({ ...draft, backyard: event.target.value })} placeholder="0.2 ac" /></label><label className="wide-field">Listing URL<input value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://…" /></label><label className="wide-field">Notes<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} placeholder="What caught your eye?" /></label></div><div className="form-footer"><span>New homes start in the New column.</span><button className="primary-button" onClick={addListing}>Save home</button></div></div> : null}
+          <div className="status-row"><span>SHOWING {visibleListings.length} OF {listings.length}</span><div className="status-filters"><button className={statusFilter === "All" ? "active" : ""} onClick={() => setStatusFilter("All")}>All</button>{STATUSES.map((status) => <button className={statusFilter === status ? "active" : ""} key={status} onClick={() => setStatusFilter(status)}>{status}</button>)}</div></div>
+          <div className="tracker-list">{visibleListings.map((listing, index) => <article className="tracker-card" key={`${listing.address}-${index}`}><div className={cn("tracker-swatch", `image-${listing.tone}`)}><span>0{index + 1}</span></div><div className="tracker-card-main"><div className="tracker-card-top"><div><h3>{listing.address}</h3><p>{listing.source} · saved to Hearth</p></div><button className={cn("status-badge", `status-${listing.status.toLowerCase()}`)} onClick={() => cycleStatus(listing.address)}>{listing.status}</button></div><div className="tracker-facts"><strong>{listing.price || "Price unknown"}</strong><span>{listing.beds || "—"} beds</span><span>{listing.baths || "—"} baths</span><span>{listing.backyard || "—"} yard</span></div>{listing.notes ? <p className="tracker-notes">{listing.notes}</p> : null}<div className="tracker-card-footer">{listing.url ? <a href={listing.url} target="_blank" rel="noreferrer">Open listing <ExternalLink size={13} /></a> : <span className="muted-label">No listing link yet</span>}<span className="card-hint">Click status to move it along</span></div></div></article>)}</div>{visibleListings.length === 0 ? <div className="empty-tracker"><Home size={20} /><h3>Nothing here yet.</h3><p>Try another filter or add a home from Zillow, Redfin, or anywhere else.</p></div> : null}<button className="add-listing" onClick={() => setIsAdding(true)}><Plus size={16} /> Add another home</button></section>
       </div>
     </main>
   );
