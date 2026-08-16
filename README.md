@@ -4,7 +4,7 @@ Hearth is a small, cloneable workspace for a house hunt.
 
 It combines an agent conversation with a living shortlist of homes. Use the conversation to think out loud, compare tradeoffs, and decide what matters. Use the shortlist to keep the facts together and export them when you want to work in a spreadsheet.
 
-## v0.1
+## v0.2 preview
 
 The first release includes:
 
@@ -15,8 +15,9 @@ The first release includes:
 - Add a home manually
 - Download a CSV with `Address`, `Price`, `Beds`, `Baths`, and `Backyard size`
 - An Eve-powered agent conversation
+- A local workspace profile and browser persistence across refreshes
 
-The property data is starter data for now. Zillow and spreadsheet syncing are the next integration layer, not hidden assumptions in this release.
+The profile is intentionally a local preview, not production authentication yet. Listings are stored in the browser, so they do not sync across devices. A real identity provider and database-backed workspace are the next integration layer, alongside Zillow/Redfin ingestion.
 
 ## Run locally
 

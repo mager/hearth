@@ -3,7 +3,7 @@
 import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { ArrowUpRight, Download, ExternalLink, FileSpreadsheet, Home, MessageCircle, Plus, Search, Sparkles, WandSparkles, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { PromptInput, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea } from "@/components/ai-elements/prompt-input";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
@@ -25,6 +25,9 @@ const STATUSES: Status[] = ["New", "Maybe", "Tour", "Pass"];
 export function AgentChat() {
   const agent = useEveAgent();
   const [listings, setListings] = useState(INITIAL_LISTINGS);
+  const [profile, setProfile] = useState<{ name: string; email: string } | null>(null);
+  const [profileDraft, setProfileDraft] = useState({ name: "", email: "" });
+  const [isHydrated, setIsHydrated] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<Source | "All">("All");
   const [statusFilter, setStatusFilter] = useState<Status | "All">("All");
   const [search, setSearch] = useState("");
@@ -37,6 +40,18 @@ export function AgentChat() {
     const matchesSearch = !query || `${listing.address} ${listing.notes}`.toLowerCase().includes(query);
     return matchesSearch && (sourceFilter === "All" || listing.source === sourceFilter) && (statusFilter === "All" || listing.status === statusFilter);
   });
+
+  useEffect(() => {
+    const storedProfile = window.localStorage.getItem("hearth.profile");
+    const storedListings = window.localStorage.getItem("hearth.listings");
+    if (storedProfile) setProfile(JSON.parse(storedProfile) as { name: string; email: string });
+    if (storedListings) setListings(JSON.parse(storedListings) as Listing[]);
+    setIsHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (isHydrated) window.localStorage.setItem("hearth.listings", JSON.stringify(listings));
+  }, [isHydrated, listings]);
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
@@ -61,11 +76,25 @@ export function AgentChat() {
     setDraft(EMPTY_DRAFT); setIsAdding(false);
   };
 
+  const signIn = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!profileDraft.name.trim() || !profileDraft.email.trim()) return;
+    const nextProfile = { name: profileDraft.name.trim(), email: profileDraft.email.trim() };
+    setProfile(nextProfile);
+    window.localStorage.setItem("hearth.profile", JSON.stringify(nextProfile));
+  };
+
   const cycleStatus = (address: string) => setListings((current) => current.map((listing) => listing.address === address ? { ...listing, status: STATUSES[(STATUSES.indexOf(listing.status) + 1) % STATUSES.length] } : listing));
+
+  if (!isHydrated) return <main className="account-gate account-loading"><span className="brand-mark"><Home size={18} /></span><p>Opening your Hearth…</p></main>;
+
+  if (!profile) return (
+    <main className="account-gate"><div className="account-card"><div className="account-logo"><span className="brand-mark"><Home size={18} /></span><span>Hearth</span><span className="version-pill">v0.2 preview</span></div><div className="panel-kicker"><Sparkles size={14} /> YOUR HOUSE-HUNTING WORKSPACE</div><h1>Keep your search<br /><em>in one place.</em></h1><p>Sign in to create a private shortlist that stays on this device while Hearth grows into a fully synced workspace.</p><form onSubmit={signIn} className="account-form"><label>Your name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} placeholder="Mager" autoComplete="name" /></label><label>Email address<input type="email" value={profileDraft.email} onChange={(event) => setProfileDraft({ ...profileDraft, email: event.target.value })} placeholder="you@example.com" autoComplete="email" /></label><button className="primary-button" type="submit">Open my workspace <ArrowUpRight size={15} /></button></form><span className="account-footnote">Local preview · Your data stays in this browser for now</span></div></main>
+  );
 
   return (
     <main className="property-app">
-      <header className="topbar"><div className="brand"><span className="brand-mark"><Home size={17} strokeWidth={2.5} /></span><span>Hearth</span><span className="version-pill">v0.1</span><span className="brand-note">house tracker</span></div><div className="top-actions"><span className="sync-status"><span className="status-dot" /> Agent online</span><button className="avatar">M</button></div></header>
+      <header className="topbar"><div className="brand"><span className="brand-mark"><Home size={17} strokeWidth={2.5} /></span><span>Hearth</span><span className="version-pill">v0.2</span><span className="brand-note">house tracker</span></div><div className="top-actions"><span className="sync-status"><span className="status-dot" /> Agent online</span><button className="avatar" title="Sign out" onClick={() => { setProfile(null); window.localStorage.removeItem("hearth.profile"); }}>{profile.name.slice(0, 1).toUpperCase()}</button></div></header>
       <div className="workspace">
         <aside className="conversation-panel"><div className="panel-kicker"><Sparkles size={14} /> HEARTH / 01</div><h1>Find a place.<br /><em>Keep it here.</em></h1><p className="lede">Drop in a listing from anywhere. I&apos;ll help you compare the ones worth your time.</p><div className="prompt-chips"><button onClick={() => void agent.send("Which home is the best value?")}>Best value <ArrowUpRight size={13} /></button><button onClick={() => void agent.send("What should I ask at a tour?")}>Tour questions <ArrowUpRight size={13} /></button></div><div className="chat-stream">{agent.data.messages.length === 0 ? <div className="starter-note"><span className="agent-avatar"><WandSparkles size={15} /></span><div><strong>Ask me anything.</strong><p>Compare homes, think through tradeoffs, or turn a messy listing into a clear note.</p></div></div> : agent.data.messages.map((message, index) => <AgentMessage canRespond={!isBusy} isStreaming={agent.status === "streaming" && index === agent.data.messages.length - 1} key={message.id} message={message} onInputResponses={(inputResponses) => { setCancellationError(undefined); return agent.respond(inputResponses); }} />)}</div>{cancellationError ? <p className="error-copy">{cancellationError}</p> : null}<PromptInput onSubmit={handleSubmit}><PromptInputTextarea placeholder="Ask about your shortlist…" /><PromptInputSubmit onStop={() => void agent.cancel()} status={agent.status} /></PromptInput><div className="privacy-note"><MessageCircle size={12} /> Your workspace, your shortlist</div></aside>
         <section className="tracker-panel"><div className="tracker-heading"><div><div className="eyebrow"><Home size={13} /> HOUSE TRACKER</div><h2>Everything worth a look.</h2><p>{listings.length} homes saved across your search</p></div><div className="tracker-actions"><button className="secondary-button" onClick={downloadCsv}><Download size={15} /> Export CSV</button><button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={15} /> Add home</button></div></div>
