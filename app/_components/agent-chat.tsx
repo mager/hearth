@@ -4,7 +4,7 @@ import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { ArrowUpRight, Download, ExternalLink, Home, MapPinned, MessageCircle, Plus, Search, Sparkles, WandSparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PromptInput, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea } from "@/components/ai-elements/prompt-input";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
@@ -56,6 +56,23 @@ export function AgentChat() {
     const query = search.trim().toLowerCase();
     return (!query || `${listing.address} ${listing.notes}`.toLowerCase().includes(query)) && (area === "All areas" || listing.neighborhood === area) && (sourceFilter === "All" || listing.source === sourceFilter) && (statusFilter === "All" || listing.status === statusFilter);
   });
+
+  const kpis = useMemo(() => {
+    const prices = listings
+      .map((l) => Number(l.price.replace(/[^0-9.]/g, "")))
+      .filter((n) => Number.isFinite(n) && n > 0)
+      .sort((a, b) => a - b);
+    const median = prices.length
+      ? prices.length % 2
+        ? prices[(prices.length - 1) / 2]
+        : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2
+      : null;
+    const byStatus: Record<Status, number> = { New: 0, Maybe: 0, Tour: 0, Pass: 0 };
+    for (const status of STATUSES) byStatus[status] = listings.filter((l) => l.status === status).length;
+    return { median, byStatus, tourReady: byStatus.Tour };
+  }, [listings]);
+
+  const medianLabel = kpis.median ? `$${Math.round(kpis.median).toLocaleString("en-US")}` : "\u2014";
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
@@ -111,7 +128,41 @@ export function AgentChat() {
         <form className="listing-search" onSubmit={handleUrlSubmit}><div className="listing-search-icon"><Search size={18} /></div><input aria-label="Add a listing URL" value={listingUrl} onChange={(event) => setListingUrl(event.target.value)} placeholder="Paste a Zillow, Redfin, Realtor.com, Homes.com, or Trulia link…" /><button type="submit">{isPreviewing ? "Finding preview…" : "Add listing"} <ArrowUpRight size={15} /></button></form>
         <div className="neighborhood-bar"><div className="neighborhood-label"><MapPinned size={15} /><span>SEARCH AREAS</span></div>{(["All areas", "Forest Park", "Oak Park"] as const).map((item) => <button className={area === item ? "active" : ""} key={item} onClick={() => setArea(item)}>{item}{item === "All areas" ? <span>{listings.length}</span> : <span>{listings.filter((listing) => listing.neighborhood === item).length}</span>}</button>)}<button className="neighborhood-add"><Plus size={14} /> Add neighborhood</button></div>
         <div className="tracker-toolbar"><label className="search-field"><Search size={15} /><input aria-label="Search saved homes" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search your saved homes" /></label><div className="source-tabs"><button className={sourceFilter === "All" ? "selected" : ""} onClick={() => setSourceFilter("All")}>All <span>{listings.length}</span></button>{SOURCES.slice(0, 3).map((source) => <button className={sourceFilter === source ? "selected" : ""} key={source} onClick={() => setSourceFilter(source)}>{source} <span>{listings.filter((listing) => listing.source === source).length}</span></button>)}</div></div>
-        <div className="map-container"><NeighborhoodMap listings={visibleListings.map((l, i) => ({ id: `${l.address}-${i}`, address: l.address, lat: l.lat, lng: l.lng, price: l.price, status: l.status }))} /></div>
+        <div className="kpi-strip">
+          <div className="kpi-tile">
+            <span className="kpi-label">Tracked</span>
+            <span className="kpi-value">{listings.length}</span>
+            <span className="kpi-sub">homes saved</span>
+          </div>
+          <div className="kpi-tile">
+            <span className="kpi-label">Median price</span>
+            <span className="kpi-value">{medianLabel}</span>
+            <span className="kpi-sub">across saved homes</span>
+          </div>
+          <div className="kpi-tile kpi-tile-wide">
+            <span className="kpi-label">Status mix</span>
+            <div className="kpi-mix">
+              <div className="kpi-mix-bar">
+                {listings.length === 0 ? (
+                  <span className="kpi-mix-empty">No homes yet</span>
+                ) : STATUSES.map((s) => (kpis.byStatus[s] > 0 ? (
+                  <span key={s} className={`mix-${s.toLowerCase()}`} style={{ flexGrow: kpis.byStatus[s] }} />
+                ) : null))}
+              </div>
+              <div className="kpi-mix-legend">
+                {STATUSES.map((s) => (
+                  <span key={s}><i className={`mix-${s.toLowerCase()}`} /> {s} <b>{kpis.byStatus[s]}</b></span>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="kpi-tile">
+            <span className="kpi-label">Tour-ready</span>
+            <span className="kpi-value">{kpis.tourReady}</span>
+            <span className="kpi-sub">ready to see</span>
+          </div>
+        </div>
+        <div className="map-container map-breakout"><NeighborhoodMap listings={visibleListings.map((l, i) => ({ id: `${l.address}-${i}`, address: l.address, lat: l.lat, lng: l.lng, price: l.price, status: l.status }))} /></div>
         {isAdding ? <AddListingForm draft={draft} setDraft={setDraft} isPreviewing={isPreviewing} onClose={() => setIsAdding(false)} onSave={addListing} onPreview={async () => { const imageUrl = await previewListing(draft.url); setDraft((current) => ({ ...current, imageUrl })); }} /> : null}
         <div className="status-row"><span>SHOWING {visibleListings.length} OF {listings.length}</span><div className="status-filters"><button className={statusFilter === "All" ? "active" : ""} onClick={() => setStatusFilter("All")}>All</button>{STATUSES.map((status) => <button className={statusFilter === status ? "active" : ""} key={status} onClick={() => setStatusFilter(status)}>{status}</button>)}</div></div>
         <div className="tracker-list">{visibleListings.map((listing, index) => <article className="tracker-card" key={`${listing.address}-${index}`}><div className={cn("tracker-swatch", `image-${listing.tone}`)}>{listing.imageUrl ? <img src={listing.imageUrl} alt="" loading="lazy" /> : null}<span>0{index + 1}</span></div><div className="tracker-card-main"><div className="tracker-card-top"><div><h3>{listing.address}</h3><p>{listing.neighborhood} · {listing.source}</p></div><button className={cn("status-badge", `status-${listing.status.toLowerCase()}`)} onClick={() => cycleStatus(listing.address)}>{listing.status}</button></div><div className="tracker-facts"><strong>{listing.price || "Price unknown"}</strong><span>{listing.beds || "—"} beds</span><span>{listing.baths || "—"} baths</span><span>{listing.backyard || "—"} yard</span></div>{listing.notes ? <p className="tracker-notes">{listing.notes}</p> : null}<div className="tracker-card-footer">{listing.url ? <a href={listing.url} target="_blank" rel="noreferrer">Open listing <ExternalLink size={13} /></a> : <span className="muted-label">No listing link yet</span>}<span className="card-hint">Click status to move it along</span></div></div></article>)}</div>{visibleListings.length === 0 ? <div className="empty-tracker"><Home size={20} /><h3>Nothing here yet.</h3><p>Try another area or add a home from the search bar.</p></div> : null}<button className="add-listing" onClick={() => setIsAdding(true)}><Plus size={16} /> Add another home</button></div>
@@ -123,4 +174,3 @@ export function AgentChat() {
 function AddListingForm({ draft, setDraft, isPreviewing, onClose, onSave, onPreview }: { draft: Draft; setDraft: (draft: Draft) => void; isPreviewing: boolean; onClose: () => void; onSave: () => void; onPreview: () => Promise<void> }) {
   return <div className="add-form"><div className="add-form-heading"><div><span className="eyebrow">NEW HOME</span><h3>Add something worth remembering</h3></div><button className="close-button" aria-label="Close add form" onClick={onClose}><X size={16} /></button></div><div className="form-grid"><label>Address<input autoFocus value={draft.address} onChange={(event) => setDraft({ ...draft, address: event.target.value })} placeholder="123 Main Street" /></label><label>Neighborhood<select value={draft.neighborhood} onChange={(event) => setDraft({ ...draft, neighborhood: event.target.value as Neighborhood })}><option>Forest Park</option><option>Oak Park</option></select></label><label>Source<select value={draft.source} onChange={(event) => setDraft({ ...draft, source: event.target.value as Source })}>{SOURCES.map((source) => <option key={source}>{source}</option>)}</select></label><label>Price<input value={draft.price} onChange={(event) => setDraft({ ...draft, price: event.target.value })} placeholder="$650,000" /></label><label>Beds<input value={draft.beds} onChange={(event) => setDraft({ ...draft, beds: event.target.value })} placeholder="3" /></label><label>Baths<input value={draft.baths} onChange={(event) => setDraft({ ...draft, baths: event.target.value })} placeholder="2" /></label><label>Backyard size<input value={draft.backyard} onChange={(event) => setDraft({ ...draft, backyard: event.target.value })} placeholder="0.2 ac" /></label><label className="wide-field">Listing URL<input value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} onBlur={() => void onPreview()} placeholder="https://…" /></label><label className="wide-field">Thumbnail URL<input value={draft.imageUrl} onChange={(event) => setDraft({ ...draft, imageUrl: event.target.value })} placeholder={isPreviewing ? "Finding a preview…" : "Auto-filled when the source provides one"} /></label><label className="wide-field">Notes<textarea value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} placeholder="What caught your eye?" /></label></div><div className="form-footer"><span>Listing photos are optional; the swatch stays as fallback.</span><button className="primary-button" onClick={onSave}>Save home</button></div></div>;
 }
-

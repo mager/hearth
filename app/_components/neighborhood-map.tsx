@@ -1,14 +1,19 @@
 "use client";
 
 import * as maplibregl from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import { LocateFixed, Minus, Plus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { cn } from "@/lib/utils";
 
 type Stop = { name: string; lat: number; lng: number; type: "CTA" | "Metra" };
 type ListingMarker = { id: string; address: string; lat: number; lng: number; price: string; status: string };
 
 const CTA_COLOR = "#2563eb";
 const METRA_COLOR = "#ea580c";
+const LISTING_COLOR = "#2f5445";
+const AREA_COLOR = "#2f5445";
+const STREET_COLOR = "#4a5a50";
 
 const STOPS: Stop[] = [
   { name: "Forest Park", lat: 41.8777, lng: -87.8153, type: "CTA" },
@@ -38,9 +43,41 @@ const STREET_LABELS: { name: string; lng: number; lat: number }[] = [
   { name: "Austin Blvd", lng: -87.772, lat: 41.895 },
 ];
 
+type LayerKey = "listings" | "cta" | "metra" | "boundaries" | "streets";
+type LayerGroup = { key: LayerKey; label: string; color: string; layers: string[] };
+
+const LAYER_GROUPS: LayerGroup[] = [
+  { key: "listings", label: "Homes", color: LISTING_COLOR, layers: ["listing-circles", "listing-labels"] },
+  { key: "cta", label: "CTA", color: CTA_COLOR, layers: ["cta-circles", "cta-labels"] },
+  { key: "metra", label: "Metra", color: METRA_COLOR, layers: ["metra-circles", "metra-labels"] },
+  { key: "boundaries", label: "Areas", color: AREA_COLOR, layers: ["boundary-fill", "boundary-line"] },
+  { key: "streets", label: "Streets", color: STREET_COLOR, layers: ["street-label-layer"] },
+];
+
+const DEFAULT_CENTER: [number, number] = [-87.81, 41.885];
+const DEFAULT_ZOOM = 14;
+
 export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    listings: true,
+    cta: true,
+    metra: true,
+    boundaries: true,
+    streets: true,
+  });
+
+  const counts = useMemo(
+    () => ({
+      listings: listings.length,
+      cta: STOPS.filter((s) => s.type === "CTA").length,
+      metra: STOPS.filter((s) => s.type === "Metra").length,
+    }),
+    [listings.length],
+  );
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -59,11 +96,19 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
         },
         layers: [{ id: "osm", type: "raster", source: "osm" }],
       },
-      center: [-87.81, 41.885],
-      zoom: 14,
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
     });
 
     mapRef.current = map;
+
+    // Scale bar — imperial, matches the US real-estate context.
+    map.addControl(new maplibregl.ScaleControl({ unit: "imperial", maxWidth: 140 }), "bottom-left");
+
+    map.on("zoom", () => setZoom(map.getZoom()));
+    map.on("mousemove", (e: maplibregl.MapMouseEvent) =>
+      setCoords({ lat: e.lngLat.lat, lng: e.lngLat.lng }),
+    );
 
     map.on("load", () => {
       const ctaStops = STOPS.filter((s) => s.type === "CTA");
@@ -87,7 +132,7 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
         type: "fill",
         source: "boundaries",
         paint: {
-          "fill-color": "#2f5445",
+          "fill-color": AREA_COLOR,
           "fill-opacity": 0.06,
         },
       });
@@ -97,7 +142,7 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
         type: "line",
         source: "boundaries",
         paint: {
-          "line-color": "#2f5445",
+          "line-color": AREA_COLOR,
           "line-width": 2,
           "line-dasharray": [4, 3],
         },
@@ -125,7 +170,7 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
           "text-anchor": "center",
         },
         paint: {
-          "text-color": "#4a5a50",
+          "text-color": STREET_COLOR,
           "text-halo-color": "#ffffff",
           "text-halo-width": 2.5,
         },
@@ -242,6 +287,22 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
     };
   }, []);
 
+  // Apply layer visibility whenever a toggle flips.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const apply = () => {
+      for (const group of LAYER_GROUPS) {
+        const vis = layers[group.key] ? "visible" : "none";
+        for (const id of group.layers) {
+          if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", vis);
+        }
+      }
+    };
+    if (map.loaded()) apply();
+    else map.once("load", apply);
+  }, [layers]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -266,7 +327,7 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
           source: "listings",
           paint: {
             "circle-radius": 10,
-            "circle-color": "#2f5445",
+            "circle-color": LISTING_COLOR,
             "circle-stroke-width": 3,
             "circle-stroke-color": "#ffffff",
           },
@@ -283,7 +344,7 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
             "text-anchor": "top",
           },
           paint: {
-            "text-color": "#2f5445",
+            "text-color": LISTING_COLOR,
             "text-halo-color": "#ffffff",
             "text-halo-width": 2,
           },
@@ -314,14 +375,52 @@ export function NeighborhoodMap({ listings }: { listings: ListingMarker[] }) {
     else map.once("load", updateListings);
   }, [listings]);
 
+  const toggleLayer = (key: LayerKey) => setLayers((current) => ({ ...current, [key]: !current[key] }));
+  const zoomIn = () => mapRef.current?.zoomIn();
+  const zoomOut = () => mapRef.current?.zoomOut();
+  const resetView = () => mapRef.current?.easeTo({ center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM });
+
   return (
-    <div className="real-map">
-      <div className="real-map-legend">
-        <span><span className="legend-dot cta" /> CTA</span>
-        <span><span className="legend-dot metra" /> Metra</span>
-        <span><span className="legend-dot listing" /> Saved homes</span>
+    <div className="map-panel">
+      <header className="map-panel-header">
+        <div className="map-panel-title">
+          <span className="eyebrow">NEIGHBORHOOD MAP</span>
+          <h3>Forest Park + Oak Park</h3>
+        </div>
+        <div className="map-panel-counts">
+          <span><b>{counts.listings}</b> homes</span>
+          <span><b>{counts.cta}</b> CTA</span>
+          <span><b>{counts.metra}</b> Metra</span>
+        </div>
+      </header>
+      <div className="map-panel-body">
+        <div className="map-layer-toggles" role="group" aria-label="Toggle map layers">
+          {LAYER_GROUPS.map((group) => (
+            <button
+              key={group.key}
+              className={cn("map-layer-toggle", layers[group.key] ? "on" : "off")}
+              onClick={() => toggleLayer(group.key)}
+              aria-pressed={layers[group.key]}
+              title={`${group.label} layer`}
+            >
+              <span className="map-layer-dot" style={{ background: group.color }} />
+              {group.label}
+            </button>
+          ))}
+        </div>
+        <div className="map-zoom-controls" role="group" aria-label="Zoom controls">
+          <button onClick={zoomIn} aria-label="Zoom in" title="Zoom in"><Plus size={15} /></button>
+          <button onClick={zoomOut} aria-label="Zoom out" title="Zoom out"><Minus size={15} /></button>
+          <button onClick={resetView} aria-label="Reset view" title="Reset view"><LocateFixed size={15} /></button>
+        </div>
+        <div ref={containerRef} className="real-map-canvas" />
+        <div className="map-readout">
+          <span className="map-readout-coords">
+            {coords ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : "Hover the map for coords"}
+          </span>
+          <span className="map-readout-zoom">zoom {zoom.toFixed(1)}</span>
+        </div>
       </div>
-      <div ref={containerRef} className="real-map-canvas" />
     </div>
   );
 }
