@@ -7,9 +7,9 @@
     "#evals/*": "./evals/*"
   },
   "scripts": {
-    "build": "eve build",
-    "dev": "eve dev",
-    "start": "eve start",
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
     "typecheck": "tsc"
   },
   "dependencies": {

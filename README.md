@@ -28,7 +28,7 @@ npm install
 npm run dev
 ```
 
-Then open the local URL printed by Eve. `npm run typecheck` and `npm run build` are available for verification.
+Then open the local Next.js URL printed by the dev server. This runs the Hearth frontend and the Eve agent together. `npm run typecheck` and `npm run build` are available for verification.
 
 ## Deploy
 
