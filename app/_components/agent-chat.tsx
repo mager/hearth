@@ -4,34 +4,29 @@ import type { UserContent } from "ai";
 import { useEveAgent } from "eve/react";
 import { ArrowUpRight, Download, ExternalLink, Home, MapPinned, MessageCircle, Plus, Search, Sparkles, WandSparkles, X } from "lucide-react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PromptInput, type PromptInputMessage, PromptInputSubmit, PromptInputTextarea } from "@/components/ai-elements/prompt-input";
+import type { Listing, ListingNeighborhood, ListingSource, ListingStatus, NewListing } from "@/lib/listings";
 import { cn } from "@/lib/utils";
 import { AgentMessage } from "./agent-message";
 
 const NeighborhoodMap = dynamic(() => import("./neighborhood-map").then((m) => m.NeighborhoodMap), { ssr: false });
 
-type Source = "Zillow" | "Redfin" | "Realtor.com" | "Homes.com" | "Trulia" | "Other";
-type Status = "New" | "Maybe" | "Tour" | "Pass";
-type Neighborhood = "Forest Park" | "Oak Park";
-type Listing = { address: string; price: string; beds: string; baths: string; backyard: string; source: Source; status: Status; neighborhood: Neighborhood; url: string; imageUrl: string; notes: string; tone: string; lat: number; lng: number };
-type Draft = Pick<Listing, "address" | "price" | "beds" | "baths" | "backyard" | "source" | "neighborhood" | "url" | "imageUrl" | "notes" | "lat" | "lng">;
+type Source = ListingSource;
+type Status = ListingStatus;
+type Neighborhood = ListingNeighborhood;
+type Draft = NewListing;
 
-const INITIAL_LISTINGS: Listing[] = [
-  { address: "7421 Madison St", price: "$589,000", beds: "3", baths: "2", backyard: "—", source: "Zillow", status: "New", neighborhood: "Forest Park", url: "https://www.zillow.com/", imageUrl: "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=700&q=80", notes: "Good light. Need to check the yard.", tone: "coral", lat: 41.8780, lng: -87.8160 },
-  { address: "815 Elgin Ave", price: "$649,900", beds: "4", baths: "2.5", backyard: "0.18 ac", source: "Redfin", status: "Tour", neighborhood: "Forest Park", url: "https://www.redfin.com/", imageUrl: "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=700&q=80", notes: "Strong contender, close to the park.", tone: "sage", lat: 41.8810, lng: -87.8120 },
-  { address: "421 Thomas Ave", price: "$725,000", beds: "4", baths: "3", backyard: "—", source: "Zillow", status: "Maybe", neighborhood: "Oak Park", url: "https://www.zillow.com/", imageUrl: "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?auto=format&fit=crop&w=700&q=80", notes: "Price feels high for the block.", tone: "sand", lat: 41.8870, lng: -87.7900 },
-];
 const EMPTY_DRAFT: Draft = { address: "", price: "", beds: "", baths: "", backyard: "", source: "Zillow", neighborhood: "Forest Park", url: "", imageUrl: "", notes: "", lat: 41.885, lng: -87.81 };
 const STATUSES: Status[] = ["New", "Maybe", "Tour", "Pass"];
 const SOURCES: Source[] = ["Zillow", "Redfin", "Realtor.com", "Homes.com", "Trulia", "Other"];
 
-export function AgentChat() {
+export function AgentChat({ user }: { readonly user: { name: string; email: string } }) {
   const agent = useEveAgent();
-  const [listings, setListings] = useState(INITIAL_LISTINGS);
-  const [profile, setProfile] = useState<{ name: string; email: string } | null>(null);
-  const [profileDraft, setProfileDraft] = useState({ name: "", email: "" });
-  const [isHydrated, setIsHydrated] = useState(false);
+  const router = useRouter();
+  const [listings, setListings] = useState<Listing[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [area, setArea] = useState<Neighborhood | "All areas">("All areas");
   const [sourceFilter, setSourceFilter] = useState<Source | "All">("All");
   const [statusFilter, setStatusFilter] = useState<Status | "All">("All");
@@ -44,13 +39,13 @@ export function AgentChat() {
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
 
   useEffect(() => {
-    const storedProfile = window.localStorage.getItem("hearth.profile");
-    const storedListings = window.localStorage.getItem("hearth.listings");
-    if (storedProfile) setProfile(JSON.parse(storedProfile) as { name: string; email: string });
-    if (storedListings) setListings(JSON.parse(storedListings) as Listing[]);
-    setIsHydrated(true);
+    let cancelled = false;
+    void fetch("/api/listings")
+      .then((response) => (response.ok ? response.json() : { listings: [] }))
+      .then((data: { listings: Listing[] }) => { if (!cancelled) { setListings(data.listings); setIsLoaded(true); } })
+      .catch(() => { if (!cancelled) setIsLoaded(true); });
+    return () => { cancelled = true; };
   }, []);
-  useEffect(() => { if (isHydrated) window.localStorage.setItem("hearth.listings", JSON.stringify(listings)); }, [isHydrated, listings]);
 
   const visibleListings = listings.filter((listing) => {
     const query = search.trim().toLowerCase();
@@ -102,9 +97,12 @@ export function AgentChat() {
     setListingUrl("");
   };
 
-  const addListing = () => {
+  const addListing = async () => {
     if (!draft.address.trim()) return;
-    setListings((current) => [...current, { ...draft, address: draft.address.trim(), status: "New", tone: "blue" }]);
+    const response = await fetch("/api/listings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...draft, address: draft.address.trim() }) });
+    if (!response.ok) return;
+    const { listing } = (await response.json()) as { listing: Listing };
+    setListings((current) => [...current, listing]);
     setDraft(EMPTY_DRAFT); setIsAdding(false);
   };
 
@@ -115,15 +113,20 @@ export function AgentChat() {
     const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = "hearth-house-tracker.csv"; link.click(); URL.revokeObjectURL(url);
   };
 
-  const signIn = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!profileDraft.name.trim() || !profileDraft.email.trim()) return; const next = { name: profileDraft.name.trim(), email: profileDraft.email.trim() }; setProfile(next); window.localStorage.setItem("hearth.profile", JSON.stringify(next)); };
-  const cycleStatus = (address: string) => setListings((current) => current.map((listing) => listing.address === address ? { ...listing, status: STATUSES[(STATUSES.indexOf(listing.status) + 1) % STATUSES.length] } : listing));
+  const signOut = async () => { await fetch("/api/logout", { method: "POST" }); router.replace("/login"); router.refresh(); };
+  const cycleStatus = (id: string) => {
+    const listing = listings.find((item) => item.id === id);
+    if (!listing) return;
+    const status = STATUSES[(STATUSES.indexOf(listing.status) + 1) % STATUSES.length];
+    setListings((current) => current.map((item) => item.id === id ? { ...item, status } : item));
+    void fetch(`/api/listings/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) });
+  };
 
-  if (!isHydrated) return <main className="account-gate account-loading"><span className="brand-mark"><Home size={18} /></span><p>Opening your Hearth…</p></main>;
-  if (!profile) return <main className="account-gate"><div className="account-card"><div className="account-logo"><span className="brand-mark"><Home size={18} /></span><span>Hearth</span><span className="version-pill">v0.2 preview</span></div><div className="panel-kicker"><Sparkles size={14} /> YOUR HOUSE-HUNTING WORKSPACE</div><h1>Keep your search<br /><em>in one place.</em></h1><p>Sign in to create a private shortlist that stays on this device while Hearth grows into a fully synced workspace.</p><form onSubmit={signIn} className="account-form"><label>Your name<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} placeholder="Mager" autoComplete="name" /></label><label>Email address<input type="email" value={profileDraft.email} onChange={(event) => setProfileDraft({ ...profileDraft, email: event.target.value })} placeholder="you@example.com" autoComplete="email" /></label><button className="primary-button" type="submit">Open my workspace <ArrowUpRight size={15} /></button></form><span className="account-footnote">Local preview · Your data stays in this browser for now</span></div></main>;
+  if (!isLoaded) return <main className="account-gate account-loading"><span className="brand-mark"><Home size={18} /></span><p>Opening your Hearth…</p></main>;
 
   return (
     <main className="property-app">
-      <header className="topbar"><div className="brand"><span className="brand-mark"><Home size={17} strokeWidth={2.5} /></span><span>Hearth</span><span className="version-pill">v0.2</span><span className="brand-note">house tracker</span></div><div className="top-actions"><button className="ask-button" onClick={() => setIsAsking((open) => !open)}><Sparkles size={14} /> Ask Hearth</button><span className="sync-status"><span className="status-dot" /> Agent online</span><button className="avatar" title="Sign out" onClick={() => { setProfile(null); window.localStorage.removeItem("hearth.profile"); }}>{profile.name.slice(0, 1).toUpperCase()}</button></div></header>
+      <header className="topbar"><div className="brand"><span className="brand-mark"><Home size={17} strokeWidth={2.5} /></span><span>Hearth</span><span className="version-pill">v0.2</span><span className="brand-note">house tracker</span></div><div className="top-actions"><button className="ask-button" onClick={() => setIsAsking((open) => !open)}><Sparkles size={14} /> Ask Hearth</button><span className="sync-status"><span className="status-dot" /> Agent online</span><button className="avatar" title={`Sign out (${user.email})`} onClick={() => void signOut()}>{user.name.slice(0, 1).toUpperCase()}</button></div></header>
       <div className="tracker-page"><div className="tracker-topline"><div><div className="eyebrow"><Home size={13} /> HOUSE TRACKER</div><h1>Everything worth a look.</h1><p>{listings.length} homes across your search · {area === "All areas" ? "Forest Park + Oak Park" : area}</p></div><div className="tracker-actions"><button className="secondary-button" onClick={downloadCsv}><Download size={15} /> Export CSV</button><button className="primary-button" onClick={() => setIsAdding(true)}><Plus size={15} /> Add home</button></div></div>
         <form className="listing-search" onSubmit={handleUrlSubmit}><div className="listing-search-icon"><Search size={18} /></div><input aria-label="Add a listing URL" value={listingUrl} onChange={(event) => setListingUrl(event.target.value)} placeholder="Paste a Zillow, Redfin, Realtor.com, Homes.com, or Trulia link…" /><button type="submit">{isPreviewing ? "Finding preview…" : "Add listing"} <ArrowUpRight size={15} /></button></form>
         <div className="neighborhood-bar"><div className="neighborhood-label"><MapPinned size={15} /><span>SEARCH AREAS</span></div>{(["All areas", "Forest Park", "Oak Park"] as const).map((item) => <button className={area === item ? "active" : ""} key={item} onClick={() => setArea(item)}>{item}{item === "All areas" ? <span>{listings.length}</span> : <span>{listings.filter((listing) => listing.neighborhood === item).length}</span>}</button>)}<button className="neighborhood-add"><Plus size={14} /> Add neighborhood</button></div>
@@ -162,10 +165,10 @@ export function AgentChat() {
             <span className="kpi-sub">ready to see</span>
           </div>
         </div>
-        <div className="map-container map-breakout"><NeighborhoodMap listings={visibleListings.map((l, i) => ({ id: `${l.address}-${i}`, address: l.address, lat: l.lat, lng: l.lng, price: l.price, status: l.status }))} /></div>
+        <div className="map-container map-breakout"><NeighborhoodMap listings={visibleListings.map((l) => ({ id: l.id, address: l.address, lat: l.lat, lng: l.lng, price: l.price, status: l.status }))} /></div>
         {isAdding ? <AddListingForm draft={draft} setDraft={setDraft} isPreviewing={isPreviewing} onClose={() => setIsAdding(false)} onSave={addListing} onPreview={async () => { const imageUrl = await previewListing(draft.url); setDraft((current) => ({ ...current, imageUrl })); }} /> : null}
         <div className="status-row"><span>SHOWING {visibleListings.length} OF {listings.length}</span><div className="status-filters"><button className={statusFilter === "All" ? "active" : ""} onClick={() => setStatusFilter("All")}>All</button>{STATUSES.map((status) => <button className={statusFilter === status ? "active" : ""} key={status} onClick={() => setStatusFilter(status)}>{status}</button>)}</div></div>
-        <div className="tracker-list">{visibleListings.map((listing, index) => <article className="tracker-card" key={`${listing.address}-${index}`}><div className={cn("tracker-swatch", `image-${listing.tone}`)}>{listing.imageUrl ? <img src={listing.imageUrl} alt="" loading="lazy" /> : null}<span>0{index + 1}</span></div><div className="tracker-card-main"><div className="tracker-card-top"><div><h3>{listing.address}</h3><p>{listing.neighborhood} · {listing.source}</p></div><button className={cn("status-badge", `status-${listing.status.toLowerCase()}`)} onClick={() => cycleStatus(listing.address)}>{listing.status}</button></div><div className="tracker-facts"><strong>{listing.price || "Price unknown"}</strong><span>{listing.beds || "—"} beds</span><span>{listing.baths || "—"} baths</span><span>{listing.backyard || "—"} yard</span></div>{listing.notes ? <p className="tracker-notes">{listing.notes}</p> : null}<div className="tracker-card-footer">{listing.url ? <a href={listing.url} target="_blank" rel="noreferrer">Open listing <ExternalLink size={13} /></a> : <span className="muted-label">No listing link yet</span>}<span className="card-hint">Click status to move it along</span></div></div></article>)}</div>{visibleListings.length === 0 ? <div className="empty-tracker"><Home size={20} /><h3>Nothing here yet.</h3><p>Try another area or add a home from the search bar.</p></div> : null}<button className="add-listing" onClick={() => setIsAdding(true)}><Plus size={16} /> Add another home</button></div>
+        <div className="tracker-list">{visibleListings.map((listing, index) => <article className="tracker-card" key={listing.id}><div className={cn("tracker-swatch", `image-${listing.tone}`)}>{listing.imageUrl ? <img src={listing.imageUrl} alt="" loading="lazy" /> : null}<span>0{index + 1}</span></div><div className="tracker-card-main"><div className="tracker-card-top"><div><h3>{listing.address}</h3><p>{listing.neighborhood} · {listing.source}</p></div><button className={cn("status-badge", `status-${listing.status.toLowerCase()}`)} onClick={() => cycleStatus(listing.id)}>{listing.status}</button></div><div className="tracker-facts"><strong>{listing.price || "Price unknown"}</strong><span>{listing.beds || "—"} beds</span><span>{listing.baths || "—"} baths</span><span>{listing.backyard || "—"} yard</span></div>{listing.notes ? <p className="tracker-notes">{listing.notes}</p> : null}<div className="tracker-card-footer">{listing.url ? <a href={listing.url} target="_blank" rel="noreferrer">Open listing <ExternalLink size={13} /></a> : <span className="muted-label">No listing link yet</span>}<span className="card-hint">Click status to move it along</span></div></div></article>)}</div>{visibleListings.length === 0 ? <div className="empty-tracker"><Home size={20} /><h3>Nothing here yet.</h3><p>Try another area or add a home from the search bar.</p></div> : null}<button className="add-listing" onClick={() => setIsAdding(true)}><Plus size={16} /> Add another home</button></div>
       {isAsking ? <aside className="assistant-drawer"><div className="drawer-heading"><div><span className="eyebrow"><Sparkles size={13} /> HEARTH AGENT</span><h2>Think it through.</h2></div><button className="close-button" onClick={() => setIsAsking(false)} aria-label="Close Hearth agent"><X size={16} /></button></div><div className="drawer-messages">{agent.data.messages.length === 0 ? <div className="starter-note"><span className="agent-avatar"><WandSparkles size={15} /></span><div><strong>Ask me anything.</strong><p>Compare homes, think through tradeoffs, or plan a tour.</p></div></div> : agent.data.messages.map((message, index) => <AgentMessage canRespond={!isBusy} isStreaming={agent.status === "streaming" && index === agent.data.messages.length - 1} key={message.id} message={message} onInputResponses={agent.respond} />)}</div><PromptInput onSubmit={handleSubmit}><PromptInputTextarea placeholder="Ask about your search…" /><PromptInputSubmit onStop={() => void agent.cancel()} status={agent.status} /></PromptInput><div className="privacy-note"><MessageCircle size={12} /> Your workspace, your shortlist</div></aside> : null}
     </main>
   );

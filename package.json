@@ -10,9 +10,11 @@
     "build": "next build",
     "dev": "next dev",
     "start": "next start",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "seed": "node scripts/seed.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@shikijs/core": "^4.1.0",
     "@shikijs/engine-javascript": "^4.1.0",
@@ -24,10 +26,12 @@
     "@tailwindcss/postcss": "^4.3.0",
     "@vercel/connect": "0.4.3",
     "ai": "^7.0.58",
+    "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "eve": "^0.38.3",
+    "jose": "^6.2.9",
     "lucide-react": "^1.16.0",
     "maplibre-gl": "^6.4.0",
     "motion": "^12.40.0",
