@@ -15,7 +15,7 @@ async function hasValidSession(request: NextRequest): Promise<boolean> {
   }
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const authed = await hasValidSession(request);
   const { pathname } = request.nextUrl;
 
